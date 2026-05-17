@@ -1,14 +1,17 @@
 """
 main.py — Rotaract Club Telegram Bot entry point.
 
-MODE DETECTION (automatic):
-  - WEBHOOK_URL set (Render) → Starlette + Uvicorn ASGI server
-      • GET  /health          → 200 OK  (Render health check)
-      • POST /webhook/<token> → processes Telegram update
-  - WEBHOOK_URL empty (local) → PTB Long Polling
+MODE DETECTION (automatic, in priority order):
+  1. WEBHOOK_URL set               → Starlette + Uvicorn, webhook active
+  2. RENDER=true (Render sets it)  → Starlette + Uvicorn, webhook pending
+                                     (health check passes; set WEBHOOK_URL
+                                      in Render dashboard to activate bot)
+  3. Neither                       → PTB Long Polling (local dev)
 """
 
+
 import asyncio
+import os
 import logging
 from contextlib import asynccontextmanager
 
@@ -24,6 +27,9 @@ from telegram.ext import (
 )
 
 import database as db
+
+# Render automatically injects RENDER=true into the container environment
+IS_RENDER: bool = os.getenv("RENDER", "").lower() == "true"
 from config import BOT_TOKEN, WEBHOOK_URL, PORT, WEBHOOK_SECRET
 from scheduler import setup_jobs
 
@@ -124,19 +130,27 @@ async def _startup() -> None:
     await _ptb_app.initialize()
     await _register_commands(_ptb_app.bot)
 
-    # Register webhook with Telegram
-    webhook_path = f"/webhook/{BOT_TOKEN}"
-    webhook_full  = f"{WEBHOOK_URL.rstrip('/')}{webhook_path}"
-    await _ptb_app.bot.set_webhook(
-        url=webhook_full,
-        secret_token=WEBHOOK_SECRET or None,
-        allowed_updates=["message", "callback_query"],
-    )
-    logger.info("Webhook registered: %s", webhook_full)
-
-    await _ptb_app.start()
-    setup_jobs(_ptb_app)
-    logger.info("PTB Application started. Bot is live on Render.")
+    if WEBHOOK_URL:
+        # Full webhook mode — Telegram sends updates to our URL
+        webhook_path = f"/webhook/{BOT_TOKEN}"
+        webhook_full = f"{WEBHOOK_URL.rstrip('/')}{webhook_path}"
+        await _ptb_app.bot.set_webhook(
+            url=webhook_full,
+            secret_token=WEBHOOK_SECRET or None,
+            allowed_updates=["message", "callback_query"],
+        )
+        logger.info("Webhook registered: %s", webhook_full)
+        await _ptb_app.start()
+        setup_jobs(_ptb_app)
+        logger.info("Bot is LIVE on Render via webhook.")
+    else:
+        # Render detected but WEBHOOK_URL not yet set (first deploy)
+        # Health check will pass; set WEBHOOK_URL in Render dashboard to activate.
+        logger.warning(
+            "WEBHOOK_URL is not set. "
+            "Health check is running but the bot is NOT receiving Telegram updates. "
+            "Add WEBHOOK_URL in your Render environment variables to activate."
+        )
 
 
 async def _shutdown() -> None:
@@ -218,9 +232,12 @@ def main() -> None:
         )
         return
 
-    if WEBHOOK_URL:
-        # Production: Render / any VPS with a public URL
-        logger.info("Starting in WEBHOOK mode → Starlette + Uvicorn on port %s", PORT)
+    if WEBHOOK_URL or IS_RENDER:
+        # Production: Render detected (even on first deploy before WEBHOOK_URL is set)
+        logger.info(
+            "Starting Starlette + Uvicorn on port %s | IS_RENDER=%s | WEBHOOK_URL=%s",
+            PORT, IS_RENDER, WEBHOOK_URL or "(not set yet)",
+        )
         starlette_app = _build_starlette_app()
         uvicorn.run(
             starlette_app,
@@ -229,7 +246,7 @@ def main() -> None:
             log_level="info",
         )
     else:
-        # Local development
+        # Local development — long polling
         _run_polling()
 
 

@@ -23,13 +23,13 @@ def main():
     db.add_user(
         telegram_id=tg_id,
         name=name,
-        username="",
+        username="ASHUTOSH",
         role="core",
         avenue=None,
     )
     # Ensure they are set to core even if already registered
     db.update_user_role(tg_id, "core")
-    print(f"✅ Admin created: {name} (ID: {tg_id}) with role=core")
+    print(f"[OK] Admin created: {name} (ID: {tg_id}) with role=core")
 
 if __name__ == "__main__":
     main()

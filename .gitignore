@@ -1,8 +1,26 @@
+# Secrets — never commit these
 .env
+
+# Database
 *.db
+
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
+
+# Logs
+logs/
+*.log
+
+# Virtual environments
 .venv/
 venv/
+env/
+
+# Reference repos cloned for study
 reference_repos/
+
+# IDE
+.vscode/
+.idea/

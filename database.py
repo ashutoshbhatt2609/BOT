@@ -237,6 +237,29 @@ def update_task_status(task_id: int, status: str) -> None:
         )
 
 
+def claim_task(task_id: int, telegram_id: int) -> bool:
+    """Assign a task to a user (claim it). Returns False if already claimed."""
+    user = get_user(telegram_id)
+    if not user:
+        return False
+    with get_conn() as conn:
+        task = conn.execute(
+            "SELECT assigned_to, status FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        if not task:
+            return False
+        # Allow re-claim only if unclaimed (assigned_to is null/empty)
+        if task["assigned_to"] and task["assigned_to"] != "Unclaimed":
+            return False  # already claimed
+        conn.execute(
+            """UPDATE tasks
+               SET assigned_to = ?, status = 'In Progress', updated_at = datetime('now')
+               WHERE id = ?""",
+            (user["name"], task_id)
+        )
+        return True
+
+
 def get_overdue_tasks() -> list:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     with get_conn() as conn:

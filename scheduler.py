@@ -1,13 +1,18 @@
 """
-scheduler.py — APScheduler jobs for reminders, escalation, and weekly reports.
+scheduler.py — PTB JobQueue-based scheduler (Railway-optimized).
+
+Strategy:
+  - NO APScheduler. Uses python-telegram-bot's built-in JobQueue.
+  - Per-task reminders scheduled at task creation time (event-driven).
+  - Daily reminder + weekly report via run_daily / run_repeating.
+  - Escalation via run_repeating at low frequency (2h).
+  - Zero idle DB polling — jobs fire only when needed.
 """
 
 import logging
 import pytz
-from datetime import datetime, timedelta
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
+from datetime import datetime, timedelta, time as dt_time
+from telegram.ext import Application, CallbackContext
 import database as db
 from utils import format_task_card
 from config import (
@@ -19,10 +24,10 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
-tz = pytz.timezone(TIMEZONE)
+IST = pytz.timezone(TIMEZONE)
 
 
-# ── Report builder ────────────────────────────────────────────────────────────
+# ── Report builder (shared with /report command) ──────────────────────────────
 
 def build_report_text() -> str:
     stats = db.get_weekly_stats()
@@ -32,7 +37,7 @@ def build_report_text() -> str:
 
     lines = [
         "📊 *Weekly Rotaract Club Report*",
-        f"🗓️ Generated: {datetime.now(tz).strftime('%d %b %Y, %I:%M %p')}",
+        f"🗓️ Generated: {datetime.now(IST).strftime('%d %b %Y, %I:%M %p')}",
         "━━━━━━━━━━━━━━━━━━━━━━━━",
         f"📋 Total Tasks:     {total}",
         f"✅ Completed:       {comp}",
@@ -47,99 +52,109 @@ def build_report_text() -> str:
     for i, av in enumerate(stats["avenues"], 1):
         av_rate = round((av["done"] / av["total"] * 100) if av["total"] else 0, 1)
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "•"
-        lines.append(
-            f"{medal} *{av['avenue']}*: {av['done']}/{av['total']} tasks ({av_rate}%)"
-        )
+        lines.append(f"{medal} *{av['avenue']}*: {av['done']}/{av['total']} ({av_rate}%)")
 
-    lines += [
-        "━━━━━━━━━━━━━━━━━━━━━━━━",
-        "Keep up the great work! 💪",
-    ]
-
+    lines += ["━━━━━━━━━━━━━━━━━━━━━━━━", "Keep up the great work! 💪"]
     report_text = "\n".join(lines)
-    # Save to DB
     db.save_report(summary=report_text, statistics=str(stats))
     return report_text
 
 
-# ── Scheduled job functions ───────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def send_weekly_report(bot) -> None:
-    """Send weekly report to core group chat."""
-    text = build_report_text()
-    if CORE_GROUP_CHAT_ID:
+async def _notify_avenue(bot, avenue: str, text: str) -> None:
+    for m in db.get_users_by_avenue(avenue):
         try:
-            await bot.send_message(CORE_GROUP_CHAT_ID, text, parse_mode="Markdown")
-            logger.info("Weekly report sent to core group.")
-        except Exception as e:
-            logger.error("Failed to send weekly report: %s", e)
-    # Also send to all core members individually
-    for user in db.get_users_by_role("core"):
-        try:
-            await bot.send_message(user["telegram_id"], text, parse_mode="Markdown")
+            await bot.send_message(m["telegram_id"], text, parse_mode="Markdown")
         except Exception:
             pass
 
 
-async def send_reminders(bot) -> None:
-    """Daily reminder for all non-completed tasks."""
+async def _notify_core(bot, text: str) -> None:
+    for u in db.get_users_by_role("core"):
+        try:
+            await bot.send_message(u["telegram_id"], text, parse_mode="Markdown")
+        except Exception:
+            pass
+
+
+# ── Per-task reminder jobs (scheduled at task creation) ───────────────────────
+
+def schedule_task_reminders(app: Application, task_id: int, deadline_str: str) -> None:
+    """
+    Schedule deadline-aware reminder jobs for a single task.
+    Called immediately when a task is created by Core.
+    Zero-scan — no DB polling; jobs know their task_id.
+    """
+    try:
+        dl = IST.localize(datetime.strptime(deadline_str, "%Y-%m-%d %H:%M"))
+    except ValueError:
+        logger.warning("Invalid deadline format for task %s: %s", task_id, deadline_str)
+        return
+
+    now = datetime.now(IST)
+    jq  = app.job_queue
+
+    reminders = [
+        (dl - timedelta(hours=24), f"⏰ *24h Reminder* — Task #{task_id} deadline is tomorrow!"),
+        (dl - timedelta(hours=5),  f"⏰ *5h Reminder* — Task #{task_id} is due in 5 hours!"),
+        (dl - timedelta(hours=1),  f"⏰ *1h Reminder* — Task #{task_id} is due in 1 HOUR!"),
+    ]
+
+    for fire_at, label in reminders:
+        if fire_at > now:
+            jq.run_once(
+                _task_reminder_job,
+                when=fire_at,
+                data={"task_id": task_id, "label": label},
+                name=f"task_{task_id}_remind",
+            )
+            logger.info("Scheduled reminder for task %s at %s", task_id, fire_at.strftime("%Y-%m-%d %H:%M"))
+
+
+async def _task_reminder_job(ctx: CallbackContext) -> None:
+    """Fire a single task-specific deadline reminder."""
+    task_id = ctx.job.data["task_id"]
+    label   = ctx.job.data["label"]
+
+    task = db.get_task(task_id)
+    if not task or task["status"] in (STATUS_COMPLETED, STATUS_AWAITING):
+        return  # Task already done — skip
+
+    text = label + "\n\n" + format_task_card(task)
+    await _notify_avenue(ctx.bot, task["avenue"] or "", text)
+
+
+# ── Recurring global jobs ─────────────────────────────────────────────────────
+
+async def _daily_reminder_job(ctx: CallbackContext) -> None:
+    """Daily 9 AM reminder for all pending/in-progress tasks."""
     tasks = [
         t for t in db.get_all_tasks()
         if t["status"] not in (STATUS_COMPLETED, STATUS_AWAITING)
     ]
+    if not tasks:
+        return
     for task in tasks:
-        members = db.get_users_by_avenue(task["avenue"])
-        text = (
-            f"⏰ *Daily Reminder*\n\n"
-            + format_task_card(task)
-        )
-        for m in members:
-            try:
-                await bot.send_message(m["telegram_id"], text, parse_mode="Markdown")
-            except Exception:
-                pass
+        text = f"⏰ *Daily Task Reminder*\n\n" + format_task_card(task)
+        await _notify_avenue(ctx.bot, task["avenue"] or "", text)
 
 
-async def send_urgent_reminders(bot) -> None:
-    """Every 5 hours — remind about Urgent tasks."""
-    tasks = [
-        t for t in db.get_all_tasks()
-        if t["priority"] == "Urgent"
-        and t["status"] not in (STATUS_COMPLETED, STATUS_AWAITING)
-    ]
-    for task in tasks:
-        members = db.get_users_by_avenue(task["avenue"])
-        text = (
-            f"🚨 *URGENT Task Reminder!*\n\n"
-            + format_task_card(task)
-        )
-        for m in members:
-            try:
-                await bot.send_message(m["telegram_id"], text, parse_mode="Markdown")
-            except Exception:
-                pass
+async def _weekly_report_job(ctx: CallbackContext) -> None:
+    """Monday 8 AM weekly report to all Core members."""
+    text = build_report_text()
+    if CORE_GROUP_CHAT_ID:
+        try:
+            await ctx.bot.send_message(CORE_GROUP_CHAT_ID, text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error("Failed group report: %s", e)
+    await _notify_core(ctx.bot, text)
 
 
-async def send_deadline_reminders(bot, hours: int) -> None:
-    """Remind about tasks with deadline within `hours` hours."""
-    tasks = db.get_upcoming_deadline_tasks(hours)
-    for task in tasks:
-        members = db.get_users_by_avenue(task["avenue"])
-        text = (
-            f"⚠️ *Deadline Alert — {hours}h Remaining!*\n\n"
-            + format_task_card(task)
-        )
-        for m in members:
-            try:
-                await bot.send_message(m["telegram_id"], text, parse_mode="Markdown")
-            except Exception:
-                pass
-
-
-async def run_escalation(bot) -> None:
-    """Escalate overdue tasks based on how many hours they're overdue."""
+async def _escalation_job(ctx: CallbackContext) -> None:
+    """Every 2h — check overdue tasks and escalate up the hierarchy."""
     overdue = db.get_overdue_tasks()
-    now = datetime.now(tz).replace(tzinfo=None)
+    now = datetime.now(IST).replace(tzinfo=None)
 
     for task in overdue:
         if not task["deadline"]:
@@ -148,112 +163,82 @@ async def run_escalation(bot) -> None:
             dl = datetime.strptime(task["deadline"], "%Y-%m-%d %H:%M")
         except ValueError:
             continue
-        hours_overdue = (now - dl).total_seconds() / 3600
 
-        base_msg = (
-            f"🚨 *ESCALATION ALERT*\n\n"
-            f"Task #{task['id']}: *{task['title']}* is overdue by "
-            f"{int(hours_overdue)}h!\n\n"
+        hours_overdue = (now - dl).total_seconds() / 3600
+        base = (
+            f"🚨 *ESCALATION — Task #{task['id']} Overdue by {int(hours_overdue)}h!*\n\n"
             + format_task_card(task)
         )
 
-        # Level 1 — always notify assigned avenue members
-        members = db.get_users_by_avenue(task["avenue"])
-        for m in members:
-            try:
-                await bot.send_message(m["telegram_id"], base_msg, parse_mode="Markdown")
-            except Exception:
-                pass
+        # Always notify avenue members
+        await _notify_avenue(ctx.bot, task["avenue"] or "", base)
 
-        # Level 2 — notify avenue director
         if hours_overdue >= ESCALATE_DIRECTOR_AFTER_H:
-            director = db.get_avenue_director(task["avenue"])
+            director = db.get_avenue_director(task["avenue"] or "")
             if director:
                 try:
-                    await bot.send_message(
+                    await ctx.bot.send_message(
                         director["telegram_id"],
-                        f"📣 [Director Escalation]\n\n" + base_msg,
+                        f"📣 [Director Escalation]\n\n" + base,
                         parse_mode="Markdown",
                     )
                 except Exception:
                     pass
 
-        # Level 3 — notify Secretary
         if hours_overdue >= ESCALATE_SECRETARY_AFTER_H:
-            secretaries = [
-                u for u in db.get_users_by_role("core")
-                if "secretary" in u["name"].lower() or "secretary" in (u.get("permissions") or "").lower()
-            ]
-            all_core = db.get_users_by_role("core")
-            targets  = secretaries or all_core[:1]
-            for t in targets:
-                try:
-                    await bot.send_message(
-                        t["telegram_id"],
-                        f"📣 [Secretary Escalation]\n\n" + base_msg,
-                        parse_mode="Markdown",
-                    )
-                except Exception:
-                    pass
+            await _notify_core(ctx.bot, f"📣 [Secretary Escalation]\n\n" + base)
 
-        # Level 4 — notify President (all core)
         if hours_overdue >= ESCALATE_PRESIDENT_AFTER_H:
-            for core in db.get_users_by_role("core"):
-                try:
-                    await bot.send_message(
-                        core["telegram_id"],
-                        f"📣 [PRESIDENT ESCALATION]\n\n" + base_msg,
-                        parse_mode="Markdown",
-                    )
-                except Exception:
-                    pass
+            await _notify_core(ctx.bot, f"🚨 [PRESIDENT ESCALATION]\n\n" + base)
 
 
-# ── Scheduler factory ─────────────────────────────────────────────────────────
+async def _urgent_reminder_job(ctx: CallbackContext) -> None:
+    """Every 5h — ping URGENT priority uncompleted tasks."""
+    tasks = [
+        t for t in db.get_all_tasks()
+        if t["priority"] == "Urgent"
+        and t["status"] not in (STATUS_COMPLETED, STATUS_AWAITING)
+    ]
+    for task in tasks:
+        text = f"🚨 *URGENT Task Reminder!*\n\n" + format_task_card(task)
+        await _notify_avenue(ctx.bot, task["avenue"] or "", text)
 
-def build_scheduler(bot) -> AsyncIOScheduler:
-    scheduler = AsyncIOScheduler(timezone=tz)
 
-    # Daily reminder at 9 AM
-    scheduler.add_job(
-        send_reminders, CronTrigger(hour=9, minute=0, timezone=tz),
-        args=[bot], id="daily_reminder", replace_existing=True,
+# ── Setup — called from main.py post_init ─────────────────────────────────────
+
+def setup_jobs(app: Application) -> None:
+    """Register all recurring jobs using PTB's built-in JobQueue."""
+    jq = app.job_queue
+
+    # Daily reminder — 9:00 AM IST, every day
+    jq.run_daily(
+        _daily_reminder_job,
+        time=dt_time(9, 0, tzinfo=IST),
+        name="daily_reminder",
     )
 
-    # Urgent tasks — every 5 hours
-    scheduler.add_job(
-        send_urgent_reminders, IntervalTrigger(hours=5),
-        args=[bot], id="urgent_reminder", replace_existing=True,
-    )
-
-    # Deadline — 24h reminder (check every hour)
-    scheduler.add_job(
-        send_deadline_reminders, IntervalTrigger(hours=1),
-        args=[bot, 24], id="dl_24h", replace_existing=True,
-    )
-
-    # Deadline — 5h reminder (check every 30 min)
-    scheduler.add_job(
-        send_deadline_reminders, IntervalTrigger(minutes=30),
-        args=[bot, 5], id="dl_5h", replace_existing=True,
-    )
-
-    # Deadline — 1h reminder (check every 15 min)
-    scheduler.add_job(
-        send_deadline_reminders, IntervalTrigger(minutes=15),
-        args=[bot, 1], id="dl_1h", replace_existing=True,
+    # Weekly report — Monday 8:00 AM IST
+    jq.run_daily(
+        _weekly_report_job,
+        time=dt_time(8, 0, tzinfo=IST),
+        days=(1,),           # 1 = Monday (PTB: 0=Sun, 1=Mon … 6=Sat)
+        name="weekly_report",
     )
 
     # Escalation check — every 2 hours
-    scheduler.add_job(
-        run_escalation, IntervalTrigger(hours=2),
-        args=[bot], id="escalation", replace_existing=True,
+    jq.run_repeating(
+        _escalation_job,
+        interval=timedelta(hours=2),
+        first=timedelta(minutes=5),  # first check 5 min after startup
+        name="escalation",
     )
 
-    # Weekly report — Every Monday at 8 AM
-    scheduler.add_job(
-        send_weekly_report, CronTrigger(day_of_week="mon", hour=8, minute=0, timezone=tz),
-        args=[bot], id="weekly_report", replace_existing=True,
+    # Urgent task reminder — every 5 hours
+    jq.run_repeating(
+        _urgent_reminder_job,
+        interval=timedelta(hours=5),
+        first=timedelta(minutes=10),
+        name="urgent_reminder",
     )
 
-    return scheduler
+    logger.info("JobQueue jobs scheduled: %s", [j.name for j in jq.jobs()])

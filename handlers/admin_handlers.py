@@ -269,6 +269,7 @@ def adduser_conv() -> ConversationHandler:
         fallbacks=[CommandHandler("cancel", cancel)],
         name="adduser_conv",
         persistent=False,
+        per_message=False,
     )
 
 
@@ -280,6 +281,7 @@ def setrole_conv() -> ConversationHandler:
             SET_ROLE_PICK: [CallbackQueryHandler(setrole_pick, pattern=r"^setrolepick_")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
     )
 
 
@@ -291,6 +293,7 @@ def setavenue_conv() -> ConversationHandler:
             SET_AV_PICK: [CallbackQueryHandler(setavenue_pick, pattern=r"^setavpick_")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
     )
 
 

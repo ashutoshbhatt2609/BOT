@@ -60,12 +60,18 @@ def priority_emoji(priority: str) -> str:
 
 def format_task_card(task) -> str:
     """Format a task as a rich Telegram message card."""
+    claimed_by = task["assigned_to"]
+    if claimed_by:
+        claim_line = f"🙋 *Claimed by:* {claimed_by}"
+    else:
+        claim_line = "🙋 *Claimed by:* _(unclaimed — tap Take Task)_"
+
     return (
         f"📋 *Task #{task['id']}: {task['title']}*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📝 {task['description'] or 'No description'}\n\n"
-        f"👥 *Avenue:* {task['avenue'] or 'Unassigned'}\n"
-        f"🎯 *Assigned to:* {task['assigned_to'] or 'Unassigned'}\n"
+        f"🏢 *Avenue:* {task['avenue'] or 'Unassigned'}\n"
+        f"{claim_line}\n"
         f"📊 *Priority:* {priority_emoji(task['priority'])}\n"
         f"📌 *Status:* {status_emoji(task['status'])}\n"
         f"🕐 *Deadline:* {format_deadline(task['deadline'])}\n"
@@ -91,17 +97,21 @@ def format_request_card(req) -> str:
 def task_status_keyboard(task_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Done",        callback_data=f"task_done_{task_id}"),
-            InlineKeyboardButton("⏳ In Progress", callback_data=f"task_prog_{task_id}"),
+            InlineKeyboardButton("🙋 Take Task",    callback_data=f"task_claim_{task_id}"),
         ],
         [
-            InlineKeyboardButton("⚠️ Delayed",     callback_data=f"task_delay_{task_id}"),
-            InlineKeyboardButton("🔄 Awaiting",    callback_data=f"task_await_{task_id}"),
+            InlineKeyboardButton("✅ Done",         callback_data=f"task_done_{task_id}"),
+            InlineKeyboardButton("⏳ In Progress",  callback_data=f"task_prog_{task_id}"),
         ],
         [
-            InlineKeyboardButton("🔵 Pending",     callback_data=f"task_pend_{task_id}"),
+            InlineKeyboardButton("⚠️ Delayed",      callback_data=f"task_delay_{task_id}"),
+            InlineKeyboardButton("🔄 Awaiting",     callback_data=f"task_await_{task_id}"),
+        ],
+        [
+            InlineKeyboardButton("🔵 Pending",      callback_data=f"task_pend_{task_id}"),
         ],
     ])
+
 
 
 def request_action_keyboard(req_id: int) -> InlineKeyboardMarkup:

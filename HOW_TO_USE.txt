@@ -1,0 +1,403 @@
+╔══════════════════════════════════════════════════════════════════╗
+║         ROTARACT CLUB TELEGRAM BOT — USER GUIDE                  ║
+║                   Complete How-To Manual                         ║
+╚══════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 1 — WHAT IS THIS BOT?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is a Telegram bot that acts as your club's central operations
+manager. Instead of using WhatsApp groups or spreadsheets, the bot
+lets you:
+
+  - Create and assign tasks to any avenue or person
+  - Set deadlines and priorities for every task
+  - Get automatic reminders before deadlines
+  - Update task status using simple buttons (Done / In Progress / Delayed)
+  - Send requests from one avenue to another (e.g., Editorial asks
+    Media & Design for posters)
+  - Broadcast announcements to all members at once
+  - Generate a full weekly performance report automatically
+  - Escalate overdue tasks up the chain of command automatically
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 2 — USER ROLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+There are 3 roles in the system:
+
+  1. CORE  (core)
+     President, VP, Secretary, Treasurer, etc.
+     → Can do EVERYTHING. Assign any task, announce, generate
+       reports, add/remove users, set roles.
+
+  2. DIRECTOR  (director)
+     Avenue Directors
+     → Can create tasks for their own avenue members.
+     → Can send inter-avenue requests.
+     → Can update task statuses.
+
+  3. MEMBER  (member)
+     Regular avenue members
+     → Can view tasks assigned to their avenue.
+     → Can update task status (Done / In Progress / Delayed).
+     → Can send inter-avenue requests.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 3 — FIRST TIME SETUP (FOR THE ADMIN / PRESIDENT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Step 1: Open Telegram and find your bot
+         (Search for the bot name you gave during BotFather setup)
+
+Step 2: Send /start
+         You will see a welcome message confirming you are Core.
+
+Step 3: Add all your members to the bot
+         For each member, use:
+
+         /adduser
+
+         The bot will ask:
+           - Their Telegram ID
+             (Members can find their ID by messaging @userinfobot)
+           - Their full name
+           - Their role  (core / director / member)
+           - Their avenue (Technical, Media & Design, etc.)
+
+         Tip: Ask all members to message @userinfobot and send
+              you their numeric ID before the meeting.
+
+Step 4: That's it. Members can now message the bot and use commands.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 4 — CREATING A TASK  (/newtask)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Only CORE and DIRECTORS can create tasks.
+
+HOW TO USE:
+  1. Type:  /newtask
+  2. Bot asks — Task Title
+     Reply with the name, e.g.:  Design Banner for Annual Fest
+
+  3. Bot asks — Description
+     Reply with details, or type:  skip
+
+  4. Bot shows buttons — Select Avenue
+     Tap the avenue you want to assign the task to.
+     Example: tap [Media & Design]
+
+  5. Bot asks — Assigned To
+     Type the person's name, or type:  avenue
+     (typing "avenue" means the whole avenue is responsible)
+
+  6. Bot asks — Deadline
+     Type the date and time in this exact format:
+     YYYY-MM-DD HH:MM
+     Example:  2026-06-01 18:00
+     Or type:  none   (if no deadline)
+
+  7. Bot shows buttons — Select Priority
+     Tap one:  [Low]  [Medium]  [High]  [Urgent]
+
+  8. DONE. The bot will:
+     - Create the task in the database
+     - Send a task card notification to all members of that avenue
+     - Show you a confirmation with task ID and details
+
+EXAMPLE TASK CARD:
+  ──────────────────────────────
+  Task #3: Design Banner for Annual Fest
+  ──────────────────────────────
+  Design a 3x4 ft banner for the main gate entrance
+  Avenue: Media & Design
+  Assigned to: Priya Sharma
+  Priority: High
+  Status: Pending
+  Deadline: Due in 5d 2h
+  ──────────────────────────────
+  [✅ Done]  [⏳ In Progress]
+  [⚠️ Delayed]  [🔄 Awaiting]
+  [🔵 Pending]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 5 — UPDATING A TASK STATUS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When a task card appears (either from a notification or /mytasks),
+you will see buttons at the bottom:
+
+  [✅ Done]       — Task is fully completed
+  [⏳ In Progress] — You are actively working on it
+  [⚠️ Delayed]    — You cannot meet the deadline
+  [🔄 Awaiting]   — Waiting for approval / feedback
+  [🔵 Pending]    — Reset back to not started
+
+Simply TAP the button that matches your current progress.
+
+What happens when you tap a button:
+  - The task status is saved in the database instantly
+  - All Core members get a notification about the status change
+  - The task card updates to show the new status
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 6 — VIEWING TASKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  /mytasks
+    → Shows all tasks for YOUR avenue (up to 10 at a time)
+    → Core members see ALL tasks across all avenues
+
+  /pending
+    → Shows all tasks currently with status "Pending"
+
+  /completed
+    → Shows all tasks that are marked as Done
+
+  /avenuetasks
+    → Shows all tasks specifically assigned to your avenue
+    → Sorted by deadline (earliest first)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 7 — INTER-AVENUE REQUESTS  (/request)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use this when your avenue needs something FROM another avenue.
+Example: Editorial needs posters from Media & Design.
+
+HOW TO USE:
+  1. Type:  /request
+  2. Bot shows buttons — Which avenue do you need help from?
+     Tap the avenue.  Example: [Media & Design]
+
+  3. Bot asks — What do you need?
+     Type a description.
+     Example:  3 poster designs for the blood donation camp
+
+  4. Bot asks — Deadline?
+     Type:  2026-05-25 12:00
+     Or:    none
+
+  5. DONE. The bot will:
+     - Notify the director and all members of that avenue
+     - Send them the request with [Accept] [Decline] [Done] buttons
+
+The receiving avenue can then:
+  - Tap [✅ Accept]  — confirms they will do it
+  - Tap [❌ Decline] — cannot fulfill the request
+  - Tap [✔️ Done]    — marks it as completed
+
+The requester gets notified automatically on every status change.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 8 — ANNOUNCEMENTS  (/announce)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CORE ONLY.
+
+  1. Type:  /announce
+  2. Bot asks — Type your announcement message
+  3. Type anything, e.g.:
+     Meeting scheduled for Sunday 10 AM at Club Room.
+     All avenue directors must attend.
+  4. Bot sends this message to EVERY registered member individually.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 9 — WEEKLY REPORT  (/report)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CORE ONLY.
+
+  Type:  /report
+
+The bot instantly generates a report showing:
+  - Total tasks
+  - Completed / Pending / In Progress / Delayed counts
+  - Overall completion rate (%)
+  - Per-avenue performance ranking (most tasks done = #1)
+
+Automatic report: Every Monday at 8:00 AM IST, the report is
+sent automatically to all core members.
+
+EXAMPLE REPORT:
+  ────────────────────────────────
+  Weekly Rotaract Club Report
+  Generated: 17 May 2026, 8:00 AM
+  ────────────────────────────────
+  Total Tasks:     24
+  Completed:       18
+  Pending:         3
+  In Progress:     2
+  Delayed:         1
+  Completion Rate: 75%
+
+  Avenue Performance:
+  1. Media & Design:  8/8 (100%)
+  2. Technical:       5/6 (83%)
+  3. Editorial:       3/5 (60%)
+  ...
+  ────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 10 — AUTOMATIC REMINDERS (NO ACTION NEEDED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The bot runs these jobs automatically in the background:
+
+  REMINDER TYPE          WHEN IT FIRES
+  ─────────────────────────────────────────────────────────────
+  Daily Reminder         Every day at 9:00 AM IST
+                         (all non-completed tasks)
+
+  Urgent Task Alert      Every 5 hours
+                         (only Urgent priority tasks)
+
+  24h Deadline Alert     When a task deadline is 24h away
+
+  5h Deadline Alert      When a task deadline is 5h away
+
+  1h Deadline Alert      When a task deadline is 1h away
+
+  Escalation Check       Every 2 hours — if a task is overdue:
+                         • 24h overdue → Avenue Director notified
+                         • 48h overdue → Secretary notified
+                         • 72h overdue → All Core notified
+
+  Weekly Report          Every Monday at 8:00 AM IST
+                         → Sent to all core members
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 11 — ADMIN COMMANDS (CORE ONLY)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  /adduser
+    Add a new member to the bot system.
+    You will be asked for their Telegram ID, name, role, avenue.
+
+  /removeuser <telegram_id>
+    Remove a member from the system.
+    Example:  /removeuser 987654321
+
+  /setrole
+    Change a member's role (core / director / member).
+    You will be asked for their ID, then pick a role.
+
+  /setavenue
+    Change which avenue a member belongs to.
+    You will be asked for their ID, then pick an avenue.
+
+  /listusers
+    Shows a list of all registered members with their
+    roles, avenues, and Telegram IDs.
+
+  /cancel
+    Cancel any in-progress command at any time.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 12 — QUICK COMMAND REFERENCE CARD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  COMMAND          WHO CAN USE       WHAT IT DOES
+  ───────────────────────────────────────────────────────────────
+  /start           Everyone          Register / show welcome
+  /help            Everyone          Show command list in Telegram
+  /mytasks         Everyone          View your avenue's tasks
+  /pending         Everyone          View all pending tasks
+  /completed       Everyone          View all completed tasks
+  /avenuetasks     Everyone          All tasks for your avenue
+  /request         Everyone          Send inter-avenue request
+  /newtask         Core + Director   Create a new task
+  /report          Core only         Generate weekly report now
+  /announce        Core only         Broadcast to all members
+  /adduser         Core only         Register a new member
+  /removeuser      Core only         Remove a member
+  /setrole         Core only         Change someone's role
+  /setavenue       Core only         Change someone's avenue
+  /listusers       Core only         List all members
+  /cancel          Everyone          Cancel current operation
+  ───────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 13 — THE 9 AVENUES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1.  Technical
+  2.  Club Service
+  3.  Community Service
+  4.  International Service
+  5.  Professional Development
+  6.  Public Relations
+  7.  Media & Design
+  8.  Editorial
+  9.  Fellowship
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 14 — PRIORITY LEVELS EXPLAINED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  LOW      — Nice to have. No strict deadline pressure.
+  MEDIUM   — Standard task. Daily reminder applies.
+  HIGH     — Important. Needs attention soon.
+  URGENT   — Critical. Reminded every 5 hours until done.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 15 — ONBOARDING STEPS FOR NEW MEMBERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Tell all new members to follow these steps:
+
+  STEP 1: Open Telegram
+  STEP 2: Search for @userinfobot and send any message
+           → It will reply with your Telegram ID (a number)
+           → Copy this number and share it with the President
+
+  STEP 3: The President will add you using /adduser
+  STEP 4: Open the bot and send /start
+  STEP 5: You're in. Use /help to see what you can do.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 16 — TIPS & BEST PRACTICES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Always set a deadline when creating tasks. This enables
+     automatic reminders — without a deadline, no reminders fire.
+
+  2. Use URGENT priority only for truly time-critical tasks.
+     Overuse will cause alert fatigue.
+
+  3. If you are delayed, tap [⚠️ Delayed] immediately.
+     This auto-escalates to the director and core after 24h.
+
+  4. Tap [🔄 Awaiting Approval] when your work is done but
+     needs someone to review or sign off on it.
+
+  5. Directors: assign tasks with a specific person name so
+     accountability is clear. Avoid just writing "avenue".
+
+  6. The bot must be kept running (python main.py) for reminders
+     and escalations to work. On a server, use a process manager
+     like PM2 or run it on Render/Railway continuously.
+
+  7. At the start of each academic year, you can reset the
+     database (delete rotaract.db) and re-run bootstrap_admin.py
+     to start fresh.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 17 — HOW TO RESTART THE BOT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If you ever restart the bot, open a terminal in the BOT folder and
+run this command:
+
+  python main.py
+
+That's it. The database (rotaract.db) keeps all data safe even
+when the bot is restarted.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Built for Rotaract Club Operations | Version 1.0 | 2026
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

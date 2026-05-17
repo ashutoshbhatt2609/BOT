@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: rotaract-club-bot
+    env: python
+    plan: free
+    region: singapore          # closest to India (IST)
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /health
+
+    envVars:
+      # ── Required ──────────────────────────────────────────────────────────
+      - key: BOT_TOKEN
+        sync: false            # set manually in Render dashboard
+
+      - key: WEBHOOK_URL
+        sync: false            # set to your Render public URL, e.g.:
+                               # https://rotaract-club-bot.onrender.com
+
+      # ── Optional ──────────────────────────────────────────────────────────
+      - key: TIMEZONE
+        value: Asia/Kolkata
+
+      - key: DB_PATH
+        value: rotaract.db
+
+      - key: CORE_GROUP_CHAT_ID
+        value: "0"             # set to your core Telegram group ID
+
+      - key: WEBHOOK_SECRET
+        generateValue: true    # auto-generates a secure random secret

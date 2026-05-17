@@ -1,27 +1,30 @@
 """
-main.py — Entry point for the Rotaract Club Telegram Bot.
+main.py — Rotaract Club Telegram Bot entry point.
 
 MODE DETECTION (automatic):
-  - Local dev  → python main.py        → uses Long Polling
-  - Railway    → PORT env set          → uses Webhook (event-driven, lightweight)
-
-Usage:
-  1. Copy .env.example to .env and fill in BOT_TOKEN
-  2. pip install -r requirements.txt
-  3. python main.py
+  - WEBHOOK_URL set (Render) → Starlette + Uvicorn ASGI server
+      • GET  /health          → 200 OK  (Render health check)
+      • POST /webhook/<token> → processes Telegram update
+  - WEBHOOK_URL empty (local) → PTB Long Polling
 """
 
+import asyncio
 import logging
-from telegram import BotCommand
+from contextlib import asynccontextmanager
+
+import uvicorn
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse, JSONResponse
+from starlette.routing import Route
+from telegram import BotCommand, Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters,
 )
 
 import database as db
-from config import (
-    BOT_TOKEN, WEBHOOK_URL, PORT, WEBHOOK_SECRET,
-)
+from config import BOT_TOKEN, WEBHOOK_URL, PORT, WEBHOOK_SECRET
 from scheduler import setup_jobs
 
 # Handlers
@@ -34,10 +37,8 @@ from handlers.task_handlers    import (
     mytasks, pending_tasks, completed_tasks, avenue_tasks,
     task_status_callback, newtask_conv,
 )
-from handlers.request_handlers  import (
-    request_conv, request_action_callback,
-)
-from handlers.message_handlers  import msg_conv
+from handlers.request_handlers import request_conv, request_action_callback
+from handlers.message_handlers import msg_conv
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -45,12 +46,50 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Global PTB Application instance (shared across ASGI requests)
+_ptb_app: Application | None = None
 
-# ── Post-init (runs after bot connects) ──────────────────────────────────────
 
-async def post_init(application: Application) -> None:
-    """Register bot commands in Telegram menu + start JobQueue jobs."""
-    await application.bot.set_my_commands([
+# ── Handler registration (shared between polling & webhook) ───────────────────
+
+def _register_handlers(app: Application) -> None:
+    """Attach all handlers to a PTB Application instance."""
+    # Conversation handlers — must be registered first
+    app.add_handler(adduser_conv())
+    app.add_handler(setrole_conv())
+    app.add_handler(setavenue_conv())
+    app.add_handler(announce_conv())
+    app.add_handler(newtask_conv())
+    app.add_handler(request_conv())
+    app.add_handler(msg_conv())
+
+    # Command handlers
+    app.add_handler(CommandHandler("start",       start))
+    app.add_handler(CommandHandler("help",        help_cmd))
+    app.add_handler(CommandHandler("mytasks",     mytasks))
+    app.add_handler(CommandHandler("pending",     pending_tasks))
+    app.add_handler(CommandHandler("completed",   completed_tasks))
+    app.add_handler(CommandHandler("avenuetasks", avenue_tasks))
+    app.add_handler(CommandHandler("report",      report_cmd))
+    app.add_handler(CommandHandler("removeuser",  removeuser))
+    app.add_handler(CommandHandler("listusers",   listusers))
+
+    # Inline keyboard callbacks
+    app.add_handler(CallbackQueryHandler(task_status_callback,    pattern=r"^task_"))
+    app.add_handler(CallbackQueryHandler(request_action_callback, pattern=r"^req_"))
+
+    # Group message logger
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, handle_group_message)
+    )
+
+    # Unknown command fallback
+    app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+
+
+async def _register_commands(bot) -> None:
+    """Set Telegram bot command menu."""
+    await bot.set_my_commands([
         BotCommand("start",       "Register / Welcome"),
         BotCommand("help",        "Show all commands"),
         BotCommand("msg",         "Send message to an avenue or leadership"),
@@ -71,53 +110,103 @@ async def post_init(application: Application) -> None:
     ])
     logger.info("Bot commands registered.")
 
-    # Start recurring JobQueue jobs (daily reminder, weekly report, escalation)
-    setup_jobs(application)
+
+# ── WEBHOOK MODE — Starlette ASGI app (Render) ───────────────────────────────
+
+async def _startup() -> None:
+    """Initialise PTB Application on Starlette startup."""
+    global _ptb_app
+    db.init_db()
+
+    _ptb_app = Application.builder().token(BOT_TOKEN).build()
+    _register_handlers(_ptb_app)
+
+    await _ptb_app.initialize()
+    await _register_commands(_ptb_app.bot)
+
+    # Register webhook with Telegram
+    webhook_path = f"/webhook/{BOT_TOKEN}"
+    webhook_full  = f"{WEBHOOK_URL.rstrip('/')}{webhook_path}"
+    await _ptb_app.bot.set_webhook(
+        url=webhook_full,
+        secret_token=WEBHOOK_SECRET or None,
+        allowed_updates=["message", "callback_query"],
+    )
+    logger.info("Webhook registered: %s", webhook_full)
+
+    await _ptb_app.start()
+    setup_jobs(_ptb_app)
+    logger.info("PTB Application started. Bot is live on Render.")
 
 
-# ── Application builder ───────────────────────────────────────────────────────
+async def _shutdown() -> None:
+    """Gracefully stop PTB Application on Starlette shutdown."""
+    if _ptb_app:
+        await _ptb_app.stop()
+        await _ptb_app.shutdown()
+        logger.info("PTB Application shut down cleanly.")
 
-def build_app() -> Application:
-    app = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .post_init(post_init)
-        .build()
+
+@asynccontextmanager
+async def _lifespan(app):
+    await _startup()
+    yield
+    await _shutdown()
+
+
+# ── Starlette route handlers ──────────────────────────────────────────────────
+
+async def health_check(request: Request) -> PlainTextResponse:
+    """Render health check — must return 200."""
+    return PlainTextResponse("OK — Rotaract Bot is running.", status_code=200)
+
+
+async def telegram_webhook(request: Request) -> PlainTextResponse:
+    """Receive Telegram webhook updates and feed to PTB."""
+    # Optional secret token validation
+    if WEBHOOK_SECRET:
+        incoming_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if incoming_secret != WEBHOOK_SECRET:
+            logger.warning("Invalid webhook secret token received.")
+            return PlainTextResponse("Unauthorized", status_code=403)
+
+    try:
+        body   = await request.json()
+        update = Update.de_json(data=body, bot=_ptb_app.bot)
+        await _ptb_app.process_update(update)
+    except Exception as e:
+        logger.error("Error processing update: %s", e)
+
+    return PlainTextResponse("OK", status_code=200)
+
+
+def _build_starlette_app() -> Starlette:
+    return Starlette(
+        lifespan=_lifespan,
+        routes=[
+            Route("/health",                  health_check,     methods=["GET"]),
+            Route("/",                        health_check,     methods=["GET"]),
+            Route(f"/webhook/{BOT_TOKEN}",    telegram_webhook, methods=["POST"]),
+        ],
     )
 
-    # ── Conversation handlers (registered first — highest priority) ───────────
-    app.add_handler(adduser_conv())
-    app.add_handler(setrole_conv())
-    app.add_handler(setavenue_conv())
-    app.add_handler(announce_conv())
-    app.add_handler(newtask_conv())
-    app.add_handler(request_conv())
-    app.add_handler(msg_conv())
 
-    # ── Command handlers ──────────────────────────────────────────────────────
-    app.add_handler(CommandHandler("start",       start))
-    app.add_handler(CommandHandler("help",        help_cmd))
-    app.add_handler(CommandHandler("mytasks",     mytasks))
-    app.add_handler(CommandHandler("pending",     pending_tasks))
-    app.add_handler(CommandHandler("completed",   completed_tasks))
-    app.add_handler(CommandHandler("avenuetasks", avenue_tasks))
-    app.add_handler(CommandHandler("report",      report_cmd))
-    app.add_handler(CommandHandler("removeuser",  removeuser))
-    app.add_handler(CommandHandler("listusers",   listusers))
+# ── POLLING MODE — local development ─────────────────────────────────────────
 
-    # ── Inline keyboard callbacks ─────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(task_status_callback,    pattern=r"^task_"))
-    app.add_handler(CallbackQueryHandler(request_action_callback, pattern=r"^req_"))
+def _run_polling() -> None:
+    """Start PTB in long polling mode (local dev — no WEBHOOK_URL set)."""
+    db.init_db()
+    logger.info("Starting in LONG POLLING mode (local dev)")
 
-    # ── Group message logger (logs all group messages + files to DB) ──────────
-    app.add_handler(
-        MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, handle_group_message)
-    )
+    async def _post_init(app: Application) -> None:
+        await _register_commands(app.bot)
+        setup_jobs(app)
 
-    # ── Unknown commands fallback ─────────────────────────────────────────────
-    app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+    app = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
+    _register_handlers(app)
 
-    return app
+    logger.info("Rotaract Bot running... Press Ctrl+C to stop.")
+    app.run_polling(allowed_updates=["message", "callback_query"])
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -125,36 +214,23 @@ def build_app() -> Application:
 def main() -> None:
     if not BOT_TOKEN:
         logger.error(
-            "BOT_TOKEN is not set! "
-            "Copy .env.example to .env and fill in your token."
+            "BOT_TOKEN not set! Copy .env.example → .env and fill in your token."
         )
         return
 
-    db.init_db()
-    logger.info("Database ready at: %s", __import__("config").DB_PATH)
-
-    app = build_app()
-
-    # ── Mode: Webhook (Railway) or Long Polling (local) ───────────────────────
     if WEBHOOK_URL:
-        # Production mode — Railway provides PORT automatically
-        webhook_url = f"{WEBHOOK_URL.rstrip('/')}/{BOT_TOKEN}"
-        logger.info("Starting in WEBHOOK mode → %s", webhook_url)
-        logger.info("Listening on 0.0.0.0:%s", PORT)
-
-        app.run_webhook(
-            listen="0.0.0.0",
+        # Production: Render / any VPS with a public URL
+        logger.info("Starting in WEBHOOK mode → Starlette + Uvicorn on port %s", PORT)
+        starlette_app = _build_starlette_app()
+        uvicorn.run(
+            starlette_app,
+            host="0.0.0.0",
             port=PORT,
-            webhook_url=webhook_url,
-            url_path=BOT_TOKEN,
-            secret_token=WEBHOOK_SECRET or None,
-            allowed_updates=["message", "callback_query"],
+            log_level="info",
         )
     else:
-        # Local development mode — Long Polling
-        logger.info("WEBHOOK_URL not set — starting in LONG POLLING mode (local dev).")
-        logger.info("Rotaract Bot is running... Press Ctrl+C to stop.")
-        app.run_polling(allowed_updates=["message", "callback_query"])
+        # Local development
+        _run_polling()
 
 
 if __name__ == "__main__":

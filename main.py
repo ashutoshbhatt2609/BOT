@@ -30,7 +30,7 @@ import database as db
 
 # Render automatically injects RENDER=true into the container environment
 IS_RENDER: bool = os.getenv("RENDER", "").lower() == "true"
-from config import BOT_TOKEN, WEBHOOK_URL, PORT, WEBHOOK_SECRET
+from config import BOT_TOKEN, WEBHOOK_URL, PORT, WEBHOOK_SECRET, ADMIN_TELEGRAM_ID, ADMIN_NAME
 from scheduler import setup_jobs
 
 # Handlers
@@ -123,6 +123,8 @@ async def _startup() -> None:
     """Initialise PTB Application on Starlette startup."""
     global _ptb_app
     db.init_db()
+    if ADMIN_TELEGRAM_ID:
+        db.bootstrap_admin(ADMIN_TELEGRAM_ID, ADMIN_NAME)
 
     _ptb_app = Application.builder().token(BOT_TOKEN).build()
     _register_handlers(_ptb_app)
@@ -210,6 +212,8 @@ def _build_starlette_app() -> Starlette:
 def _run_polling() -> None:
     """Start PTB in long polling mode (local dev — no WEBHOOK_URL set)."""
     db.init_db()
+    if ADMIN_TELEGRAM_ID:
+        db.bootstrap_admin(ADMIN_TELEGRAM_ID, ADMIN_NAME)
     logger.info("Starting in LONG POLLING mode (local dev)")
 
     async def _post_init(app: Application) -> None:

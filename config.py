@@ -11,6 +11,11 @@ load_dotenv()
 # ── Bot credentials ───────────────────────────────────────────────────────────
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
 
+# ── Main admin auto-bootstrap ─────────────────────────────────────────────────
+# Set these in Render env vars → bot creates you as Core admin on every startup
+ADMIN_TELEGRAM_ID: int = int(os.getenv("ADMIN_TELEGRAM_ID", "0"))
+ADMIN_NAME: str        = os.getenv("ADMIN_NAME", "Admin")
+
 # ── Webhook (Railway production) vs Polling (local dev) ───────────────────────
 # Railway injects PORT automatically. If it's set, we use webhook mode.
 WEBHOOK_URL: str   = os.getenv("WEBHOOK_URL", "")   # e.g. https://yourapp.railway.app

@@ -148,6 +148,31 @@ def remove_user(telegram_id: int) -> None:
         conn.execute("DELETE FROM users WHERE telegram_id = ?", (telegram_id,))
 
 
+def bootstrap_admin(telegram_id: int, name: str) -> None:
+    """
+    Ensure the main admin exists as Core in the database.
+    Called on every startup — safe to run repeatedly.
+    If user already exists, upgrades them to core role.
+    If user doesn't exist, creates them fresh.
+    """
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT id FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE users SET role = 'core', name = ? WHERE telegram_id = ?",
+                (name, telegram_id)
+            )
+        else:
+            conn.execute(
+                """INSERT INTO users (telegram_id, name, username, role, avenue)
+                   VALUES (?, ?, ?, 'core', NULL)""",
+                (telegram_id, name, "")
+            )
+    logger.info("Admin bootstrapped: %s (%s) as Core.", name, telegram_id)
+
+
 def get_users_by_role(role: str) -> list:
     with get_conn() as conn:
         return conn.execute(
